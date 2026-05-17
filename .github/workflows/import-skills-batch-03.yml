@@ -1,0 +1,56 @@
+name: Import skills batch 03
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/import-skills-batch-03.yml
+
+permissions:
+  contents: write
+
+jobs:
+  import-skills:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Download source skills
+        run: |
+          set -euo pipefail
+          curl -L https://github.com/JimLiu/baoyu-skills/archive/refs/heads/main.tar.gz -o /tmp/baoyu-skills.tar.gz
+          mkdir -p /tmp/baoyu-src
+          tar -xzf /tmp/baoyu-skills.tar.gz -C /tmp/baoyu-src --strip-components=1
+
+      - name: Copy batch 03 skills
+        run: |
+          set -euo pipefail
+          mkdir -p skills
+          for skill in \
+            baoyu-imagine \
+            baoyu-infographic \
+            baoyu-markdown-to-html \
+            baoyu-post-to-wechat \
+            baoyu-post-to-weibo
+          do
+            rm -rf "skills/$skill"
+            cp -R "/tmp/baoyu-src/skills/$skill" "skills/$skill"
+          done
+
+      - name: Commit imported skills
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add skills/baoyu-imagine skills/baoyu-infographic skills/baoyu-markdown-to-html skills/baoyu-post-to-wechat skills/baoyu-post-to-weibo
+          if git diff --cached --quiet; then
+            echo "No skill changes to commit."
+          else
+            git commit -m "Import skills batch 03"
+            git push
+          fi
