@@ -1,0 +1,54 @@
+name: Import Anthropic skills batch 05
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/import-skills-batch-05-anthropic.yml
+
+permissions:
+  contents: write
+
+jobs:
+  import-skills:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Download source skills
+        run: |
+          set -euo pipefail
+          curl -L https://github.com/anthropics/skills/archive/refs/heads/main.tar.gz -o /tmp/anthropic-skills.tar.gz
+          mkdir -p /tmp/anthropic-src
+          tar -xzf /tmp/anthropic-skills.tar.gz -C /tmp/anthropic-src --strip-components=1
+
+      - name: Copy Anthropic skills
+        run: |
+          set -euo pipefail
+          mkdir -p skills
+          for skill in \
+            canvas-design \
+            doc-coauthoring \
+            docx
+          do
+            rm -rf "skills/$skill"
+            cp -R "/tmp/anthropic-src/skills/$skill" "skills/$skill"
+          done
+
+      - name: Commit imported skills
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add skills/canvas-design skills/doc-coauthoring skills/docx
+          if git diff --cached --quiet; then
+            echo "No skill changes to commit."
+          else
+            git commit -m "Import Anthropic skills batch 05"
+            git push
+          fi
