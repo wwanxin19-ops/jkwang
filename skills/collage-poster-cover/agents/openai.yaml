@@ -1,0 +1,4 @@
+interface:
+  display_name: "剪贴杂志海报"
+  short_description: "生成手撕拼贴、杂志封面感、复古印刷质感的封面图和海报图。"
+  default_prompt: "请用这个 skill 生成一张剪贴画、手撕纸、杂志拼贴风格的封面图。主题："
