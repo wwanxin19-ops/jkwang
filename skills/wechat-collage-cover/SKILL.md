@@ -1,5 +1,6 @@
 ---
 name: wechat-collage-cover
+version: "1.0"
 description: >-
   Generate WeChat Official Account cover images in a premium editorial collage style: torn-paper collage, visual magazine cover, vintage print grain, mixed media layers, bold Chinese/English typography, and conceptual visual metaphors. Use when the user asks for 微信公众号封面图, 公众号封面, 封面海报, 剪贴画风格海报, 手撕拼贴, 视觉杂志感, retro editorial collage poster, or provides a style/title/subtitle/aspect ratio and wants an image generated with image_generate / GPT Image 2. Supports style direction, main title, subtitle, aspect ratio, language, context, mood, and forbidden elements.
 ---
@@ -8,11 +9,14 @@ description: >-
 
 Create a final WeChat Official Account cover image, not just a prompt. Default to `image_generate` with the current configured GPT Image 2 backend. If the tool does not expose explicit model selection, do not claim a different model; use the configured `image_generate` backend.
 
+This is the **version 1.0 primary workflow skill** for Xiaohua's WeChat cover chain: upstream Xiaohui provides an article title; Xiaohua uses this skill to generate the WeChat Official Account cover image from the title plus optional style; after generation, return the generated cover image back to Xiaohui / the originating handoff channel.
+
 ## Input Fields
 
 Accept any of these fields from the user:
 
-- `主题词 / 主标题` or `主标题`: required.
+- `主题词 / 主标题` or `主标题`: required. In the workflow chain, this normally comes from upstream Xiaohui's generated article title.
+- `风格 / 情绪倾向`: optional. If not provided, use the default premium editorial collage style: hand-torn collage, visual magazine cover, vintage print grain, strong title typography, modern bright contrast, balanced mixed media.
 - `副标题`: optional.
 - `尺寸`: default WeChat Official Account cover target size is **900×383 px**. Treat this as the final composition/crop target even when the generation tool only supports coarse aspect ratios.
 - `画幅比例`: optional. Default for WeChat cover: approximately **900:383 ≈ 2.35:1**, mapped to `landscape` in `image_generate` unless the user explicitly gives another ratio. If the user gives 5:2, 3:2, 4:5, 1:1, or 3:4, map to the closest supported tool aspect ratio:
@@ -27,6 +31,16 @@ Accept any of these fields from the user:
 - `禁用元素`: optional; enforce explicitly.
 
 If the user omits non-critical fields, proceed with defaults instead of asking. Ask only if the main title/theme is missing.
+
+## Workflow Chain v1.0
+
+Use this chain when Xiaohui or another upstream writing agent hands off an article title for WeChat cover generation:
+
+1. Receive upstream title from Xiaohui as `主标题` / `主题`.
+2. If style is provided, integrate it. If style is missing, use the default premium editorial collage style.
+3. Generate exactly one WeChat cover image by default using `image_generate`.
+4. Apply the 900×383 px design/crop target and keep title-safe composition.
+5. Return the generated cover image back to Xiaohui / the originating handoff channel. If only the current chat is available, return the image in the current chat and state that it is ready for Xiaohui handoff.
 
 ## Mandatory Visual Direction
 
