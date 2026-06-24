@@ -6,7 +6,7 @@ This repository backs up the local Agent skills from:
 
 Current snapshot:
 
-- Total skills: 64
+- Total skills: 65
 - Snapshot date: 2026-05-17
 - Local runtime/cache folders such as `node_modules` are excluded.
 - Local private config files such as `config.yaml`, `config.json`, and `.env` are excluded.
@@ -16,6 +16,10 @@ Current snapshot:
 All skills are stored under:
 
 `skills/`
+
+## New Skills Added On 2026-06-24
+
+- `wechat-collage-cover` - WeChat Official Account cover image generation in premium torn-paper editorial collage style, with 900×383 px target size, title/subtitle/style/aspect-ratio inputs, and GPT Image 2 image generation workflow.
 
 ## New Skills Added On 2026-05-17
 

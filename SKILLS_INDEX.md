@@ -1,6 +1,10 @@
 # Skills Index
 
-Total skills: 64
+Total skills: 65
+
+## Added on 2026-06-24
+
+- `wechat-collage-cover`
 
 ## Added on 2026-05-17
 
@@ -71,6 +75,7 @@ Total skills: 64
 - `skill-creator`
 - `transcript-polisher`
 - `web-access-openclaw`
+- `wechat-collage-cover`
 - `whisper-audio-transcription`
 - `xfc-img-understand`
 - `xlsx`
