@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import shutil
 import subprocess
 import sys
@@ -26,6 +28,40 @@ class ModelSpec:
     model: str
     provider: str
     base_url: str
+
+
+@dataclass(frozen=True)
+class ManagedSystem:
+    name: str
+    home: Path
+    config_pattern: str
+    profiles: list[str]
+    restart_command: str
+    restart_args: list[str]
+
+
+ENV_DEFAULT_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
+
+
+def expand_env_defaults(value: str) -> str:
+    def repl(match: re.Match[str]) -> str:
+        name = match.group(1)
+        default = match.group(2)
+        env_value = os.environ.get(name)
+        if env_value not in (None, ""):
+            return env_value
+        return default or ""
+
+    return ENV_DEFAULT_RE.sub(repl, value)
+
+
+def expand_path(value: str | Path) -> Path:
+    expanded = expand_env_defaults(str(value))
+    return Path(os.path.expandvars(expanded)).expanduser()
+
+
+def expand_string(value: str) -> str:
+    return os.path.expandvars(expand_env_defaults(value))
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -60,8 +96,8 @@ def model_spec(data: dict[str, Any], key: str) -> ModelSpec:
     )
 
 
-def profile_config_path(hermes_home: Path, profile: str) -> Path:
-    return hermes_home / "profiles" / profile / "config.yaml"
+def profile_config_path(system: ManagedSystem, profile: str) -> Path:
+    return system.home / system.config_pattern.format(profile=profile)
 
 
 def get_current_model(config: dict[str, Any]) -> ModelSpec:
@@ -93,11 +129,15 @@ def usage_ratio(usage: dict[str, Any], model: str) -> float | None:
     return float(value)
 
 
-def backup_file(src: Path, hermes_home: Path) -> Path:
+def backup_file(src: Path, system: ManagedSystem) -> Path:
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup_dir = hermes_home / "backups" / f"hermes-model-router-{stamp}"
+    backup_dir = system.home / "backups" / f"hermes-model-router-{stamp}"
     backup_dir.mkdir(parents=True, exist_ok=True)
-    dst = backup_dir / src.relative_to(hermes_home)
+    try:
+        relative = src.relative_to(system.home)
+    except ValueError:
+        relative = Path(system.name) / src.name
+    dst = backup_dir / relative
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
     return dst
@@ -115,15 +155,81 @@ def decide_target(current: ModelSpec, primary: ModelSpec, fallback: ModelSpec, r
     return current, f"below-threshold:{ratio:.4f}<{threshold:.4f}"
 
 
-def restart_gateway(hermes_cmd: str, profile: str) -> None:
-    cmd = [hermes_cmd, "--profile", profile, "gateway", "restart"]
+def discover_profiles(home: Path, pattern: str) -> list[str]:
+    marker = "{profile}"
+    if marker not in pattern:
+        return []
+    prefix, suffix = pattern.split(marker, 1)
+    base = home / prefix
+    if not base.exists():
+        return []
+    profiles: list[str] = []
+    for child in sorted(base.iterdir()):
+        if not child.is_dir():
+            continue
+        candidate = home / pattern.format(profile=child.name)
+        if candidate.exists():
+            profiles.append(child.name)
+    return profiles
+
+
+def load_systems(cfg: dict[str, Any]) -> list[ManagedSystem]:
+    raw_systems = cfg.get("systems")
+    if raw_systems is None:
+        raw_systems = [
+            {
+                "name": "hermes",
+                "home": cfg.get("hermes_home", "~/.hermes"),
+                "config_pattern": "profiles/{profile}/config.yaml",
+                "profiles": cfg.get("profiles", "auto"),
+                "restart": cfg.get("restart", {}),
+            }
+        ]
+    if not isinstance(raw_systems, list):
+        raise SystemExit("Invalid config: systems must be a list")
+
+    systems: list[ManagedSystem] = []
+    for index, item in enumerate(raw_systems, start=1):
+        if not isinstance(item, dict):
+            raise SystemExit(f"Invalid system entry #{index}")
+        name = str(item.get("name") or f"system-{index}")
+        home = expand_path(item.get("home") or f"~/.{name}")
+        pattern = str(item.get("config_pattern") or "profiles/{profile}/config.yaml")
+        raw_profiles = item.get("profiles", "auto")
+        if raw_profiles == "auto":
+            profiles = discover_profiles(home, pattern)
+        elif isinstance(raw_profiles, list):
+            profiles = [str(profile) for profile in raw_profiles]
+        else:
+            raise SystemExit(f"Invalid profiles for {name}: use auto or a list")
+
+        restart = item.get("restart") or {}
+        if not isinstance(restart, dict):
+            raise SystemExit(f"Invalid restart config for {name}")
+        command = expand_string(str(restart.get("command") or name))
+        args = [expand_string(str(arg)) for arg in restart.get("args", [])]
+        systems.append(
+            ManagedSystem(
+                name=name,
+                home=home,
+                config_pattern=pattern,
+                profiles=profiles,
+                restart_command=command,
+                restart_args=args,
+            )
+        )
+    return systems
+
+
+def restart_gateway(system: ManagedSystem, profile: str) -> None:
+    cmd = [system.restart_command] + [arg.format(profile=profile) for arg in system.restart_args]
     subprocess.run(cmd, check=True)
 
 
 def status(args: argparse.Namespace) -> int:
     cfg = load_yaml(Path(args.config))
-    hermes_home = Path(cfg["hermes_home"]).expanduser()
-    usage_state = Path(cfg["usage_state"]).expanduser()
+    systems = load_systems(cfg)
+    usage_state = expand_path(cfg["usage_state"])
     usage = load_json(usage_state)
     primary = model_spec(cfg, "primary")
     fallback = model_spec(cfg, "fallback")
@@ -137,65 +243,74 @@ def status(args: argparse.Namespace) -> int:
     print(f"usage_ratio: {ratio if ratio is not None else 'missing'}")
     print()
 
-    for profile in cfg.get("profiles", []):
-        path = profile_config_path(hermes_home, profile)
-        if not path.exists():
-            print(f"{profile}: missing config {path}")
+    for system in systems:
+        print(f"[{system.name}] home: {system.home}")
+        if not system.profiles:
+            print(f"{system.name}: no profiles discovered")
+            print()
             continue
-        profile_cfg = load_yaml(path)
-        current = get_current_model(profile_cfg)
-        target, reason = decide_target(current, primary, fallback, ratio, threshold)
-        marker = "change" if target != current else "keep"
-        print(f"{profile}: {marker} {current.provider}/{current.model} -> {target.provider}/{target.model} ({reason})")
+        for profile in system.profiles:
+            path = profile_config_path(system, profile)
+            if not path.exists():
+                print(f"{system.name}/{profile}: missing config {path}")
+                continue
+            profile_cfg = load_yaml(path)
+            current = get_current_model(profile_cfg)
+            target, reason = decide_target(current, primary, fallback, ratio, threshold)
+            marker = "change" if target != current else "keep"
+            print(f"{system.name}/{profile}: {marker} {current.provider}/{current.model} -> {target.provider}/{target.model} ({reason})")
+        print()
     return 0
 
 
 def apply(args: argparse.Namespace) -> int:
     cfg = load_yaml(Path(args.config))
-    hermes_home = Path(cfg["hermes_home"]).expanduser()
-    usage_state = Path(cfg["usage_state"]).expanduser()
+    systems = load_systems(cfg)
+    usage_state = expand_path(cfg["usage_state"])
     usage = load_json(usage_state)
     primary = model_spec(cfg, "primary")
     fallback = model_spec(cfg, "fallback")
     threshold = float(cfg.get("threshold", 0.95))
     ratio = usage_ratio(usage, primary.model)
-    hermes_cmd = str((cfg.get("restart") or {}).get("command") or "hermes")
-
-    changed: list[str] = []
-    for profile in cfg.get("profiles", []):
-        path = profile_config_path(hermes_home, profile)
-        if not path.exists():
-            print(f"skip {profile}: missing config {path}")
+    changed: list[tuple[ManagedSystem, str]] = []
+    for system in systems:
+        if not system.profiles:
+            print(f"skip {system.name}: no profiles discovered")
             continue
+        for profile in system.profiles:
+            path = profile_config_path(system, profile)
+            if not path.exists():
+                print(f"skip {system.name}/{profile}: missing config {path}")
+                continue
 
-        profile_cfg = load_yaml(path)
-        current = get_current_model(profile_cfg)
-        target, reason = decide_target(current, primary, fallback, ratio, threshold)
-        if target == current:
-            print(f"keep {profile}: {current.provider}/{current.model} ({reason})")
-            continue
+            profile_cfg = load_yaml(path)
+            current = get_current_model(profile_cfg)
+            target, reason = decide_target(current, primary, fallback, ratio, threshold)
+            if target == current:
+                print(f"keep {system.name}/{profile}: {current.provider}/{current.model} ({reason})")
+                continue
 
-        print(f"switch {profile}: {current.provider}/{current.model} -> {target.provider}/{target.model} ({reason})")
-        if args.dry_run:
-            continue
+            print(f"switch {system.name}/{profile}: {current.provider}/{current.model} -> {target.provider}/{target.model} ({reason})")
+            if args.dry_run:
+                continue
 
-        backup = backup_file(path, hermes_home)
-        set_current_model(profile_cfg, target)
-        write_yaml(path, profile_cfg)
-        print(f"backup {profile}: {backup}")
-        changed.append(profile)
+            backup = backup_file(path, system)
+            set_current_model(profile_cfg, target)
+            write_yaml(path, profile_cfg)
+            print(f"backup {system.name}/{profile}: {backup}")
+            changed.append((system, profile))
 
     if args.restart_gateway and not args.dry_run:
-        for profile in changed:
-            print(f"restart gateway: {profile}")
-            restart_gateway(hermes_cmd, profile)
+        for system, profile in changed:
+            print(f"restart gateway: {system.name}/{profile}")
+            restart_gateway(system, profile)
 
     return 0
 
 
 def set_usage(args: argparse.Namespace) -> int:
     cfg = load_yaml(Path(args.config))
-    usage_state = Path(cfg["usage_state"]).expanduser()
+    usage_state = expand_path(cfg["usage_state"])
     usage_state.parent.mkdir(parents=True, exist_ok=True)
     usage = load_json(usage_state)
     usage[args.model] = {
