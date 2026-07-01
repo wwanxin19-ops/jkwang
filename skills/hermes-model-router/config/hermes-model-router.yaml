@@ -1,0 +1,21 @@
+hermes_home: /Users/jkmingdian/.hermes
+usage_state: /Users/jkmingdian/.hermes/model-router/usage.json
+threshold: 0.95
+cooldown_seconds: 300
+
+primary:
+  model: gpt-5.5
+  provider: openai-codex
+  base_url: https://chatgpt.com/backend-api/codex
+
+fallback:
+  model: kimi-k2.7-code
+  provider: kimi-coding
+  base_url: https://api.kimi.com/coding
+
+profiles:
+  - xiaoai-agent
+  - writing-agent
+
+restart:
+  command: /Users/jkmingdian/.hermes/hermes-agent/venv/bin/hermes
