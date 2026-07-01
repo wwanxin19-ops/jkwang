@@ -1,5 +1,4 @@
-hermes_home: /Users/jkmingdian/.hermes
-usage_state: /Users/jkmingdian/.hermes/model-router/usage.json
+usage_state: ${HERMES_MODEL_ROUTER_USAGE:-~/.model-router/usage.json}
 threshold: 0.95
 cooldown_seconds: 300
 
@@ -13,9 +12,27 @@ fallback:
   provider: kimi-coding
   base_url: https://api.kimi.com/coding
 
-profiles:
-  - xiaoai-agent
-  - writing-agent
+systems:
+  - name: hermes
+    home: ${HERMES_HOME:-~/.hermes}
+    config_pattern: profiles/{profile}/config.yaml
+    profiles: auto
+    restart:
+      command: ${HERMES_CMD:-hermes}
+      args:
+        - --profile
+        - "{profile}"
+        - gateway
+        - restart
 
-restart:
-  command: /Users/jkmingdian/.hermes/hermes-agent/venv/bin/hermes
+  - name: openclaw
+    home: ${OPENCLAW_HOME:-~/.openclaw}
+    config_pattern: profiles/{profile}/config.yaml
+    profiles: auto
+    restart:
+      command: ${OPENCLAW_CMD:-openclaw}
+      args:
+        - --profile
+        - "{profile}"
+        - gateway
+        - restart
